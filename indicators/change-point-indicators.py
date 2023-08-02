@@ -36,6 +36,7 @@ def get_data(ticker, data_path="data.pkl", num_of_days=500):
 
 def detect_changes(time_series):
   signal = time_series.values
+  # tune jump value?
   algo = rpt.Pelt(model="rbf", min_size=1, jump=10).fit(signal)
   result = algo.predict(pen=2)
   change_points = [i for i in result if i < len(signal)]
@@ -46,6 +47,7 @@ def detect_changes(time_series):
 df = get_data(ticker="GOOG")
 signal = df['Adj Close']
 changes = detect_changes(signal)
+# tune lookback window?
 lookback_window = 10
 # center=True would introduce a look-ahead bias
 rolling_mean = signal.rolling(window=lookback_window, center=False).mean()
@@ -72,6 +74,7 @@ ignore_weak_trends = False
 for i in changes:
   lookback = rolling_mean[i-lookback_window:i]
   res = scipy.stats.linregress(range(len(lookback)), lookback)
+  # tune 0.15 threshold?
   if ignore_weak_trends and abs(res.slope) < 0.15:
     continue
   if res.slope > 0:
