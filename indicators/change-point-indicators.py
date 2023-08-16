@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 
 
-def get_data(ticker, data_path="data.pkl", num_of_days=500):
+def get_data(ticker, data_path="data.pkl", num_of_days=365*3):
   # check to see if there's a cache on disk and read from it
   if os.path.isfile(data_path):
     file = open(data_path, 'rb')
@@ -67,33 +67,69 @@ ax.set_xlabel('Time')
 ax.set_ylabel('Price')
 ax.set_title('BUY/SELL Indicators Based on Mean-Reversion and Change Point Detection')
 
-
 # we use the slope of the rolling mean to indicate a BUY or SELL
 #  this makes some assumptions but we're using it for simplicity
-ignore_weak_trends = False
+#  at each changepoint we look backwards to determine the slope of 5 different
+#  trend durations. we weight each duration, favoring shorter durations then sum
+#  the weighted values into an overall sentiment/indicator
 for i in changes:
-  lookback = rolling_mean[i-lookback_window:i]
-  res = scipy.stats.linregress(range(len(lookback)), lookback)
-  # tune 0.15 threshold?
-  if ignore_weak_trends and abs(res.slope) < 0.15:
-    continue
-  if res.slope > 0:
-   action = "BUY"
+
+  action = ""
+  weight = 0
+  # Tune lookback weights?
+  weight_table = {"1yr":0.036219, "6mo":0.069814, "3mo":0.13457, "1mo":0.259395, "1w":0.5}
+  for duration_name, duration in {"1yr": 365, "6mo": 182, "3mo": 91, "1mo": 30, "1w":7}.items():
+    if duration > i:
+      duration = i - lookback_window
+    lookback = rolling_mean[i-duration:i]
+    res = scipy.stats.linregress(range(len(lookback)), lookback)
+    weight += res.slope * weight_table[duration_name]
+    if res.slope > 0:
+      action = action + str(round(res.slope, 2)) + "_BUY_" + duration_name + "\n"
+    else:
+      action = action + str(round(res.slope, 2)) + "_SELL_" + duration_name + "\n"
+
+  if weight > 0:
+    action += str(round(weight, 2)) + "_BUY_WEIGHTED"
   else:
-    action = "SELL"
+    action += str(round(weight, 2)) + "_SELL_WEIGHTED"
+
   ax.axvline(signal.index[i], color='red', linestyle='--')
-  ax.text(signal.index[i], signal.min(), action+str(round(res.slope, 2)), color='red', rotation=45)
+  y = random.randint(int(signal.min()), int(signal.mean()))
+  ax.text(signal.index[i], y, action, color='red')
 
 
 # If the price goes outside of 2 stddev from the rolling mean,
-#  we assume it will revert to the mean "soon"
+#  we assume it will revert to the mean "soon". at each breakout
+#  we determine how far into the future we would have been correct
 for idx in range(len(signal)):
+  bag_holdin = True
+
   if signal[idx] > upper[idx]:
+    action = "SELL_"
+    for idx2 in range(len(signal[idx:])):
+      if signal[idx+idx2] < signal[idx]:
+        action = action + str(idx2) + "_days_until_flat"
+        bag_holdin = False
+        break
+    if bag_holdin:
+      action += "YOU_ARE_STILL_BAG_HOLDIN'"
+      bag_holdin = False
     plt.scatter(signal.index[idx], signal[idx], color="purple")
-    ax.text(signal.index[idx], signal[idx], "SELL", rotation=45)
+    ax.text(signal.index[idx], signal[idx], action, rotation=45)
+
   if signal[idx] < lower[idx]:
+    action = "BUY_"
+    for idx2 in range(len(signal[idx:])):
+      if signal[idx+idx2] > signal[idx]:
+        action = action + str(idx2) + "_days_until_flat"
+        bag_holdin = False
+        break
+    if bag_holdin:
+      action += "YOU_ARE_STILL_BAG_HOLDIN'"
+      bag_holdin = False
     plt.scatter(signal.index[idx], signal[idx], color="purple")
-    ax.text(signal.index[idx], signal[idx], "BUY", rotation=45)
+    ax.text(signal.index[idx], signal[idx], action, rotation=45)
 
 
 ax.legend()
